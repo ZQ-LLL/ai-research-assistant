@@ -141,30 +141,41 @@ TOOLS = [
 
 def _execute_tool(name: str, args: dict, collection) -> str:
     """Run a tool and return its result as a string for the model to read."""
+    print(f"[tool] → {name}  args={str(args)[:120]}")
 
     if name == "search_web":
         results = _search_web(args["query"], max_results=args.get("max_results", 4))
         lines = []
         for r in results:
             lines.append(f"Title:   {r['title']}\nURL:     {r['url']}\nSnippet: {r['content']}\n")
-        return "\n".join(lines) if lines else "No results found."
+        out = "\n".join(lines) if lines else "No results found."
+        print(f"[tool] ✓ search_web — {len(results)} results")
+        return out
 
     elif name == "scrape_and_store":
         url = args["url"]
+        print(f"[tool]   scraping {url}")
         text = scrape_url(url)
         if text is None:
+            print(f"[tool]   scrape failed (None)")
             return f"Failed to scrape {url} — page may be paywalled or bot-protected."
-        chunks = chunk_text(text)[:60]  # cap per-page to keep embedding time bounded
+        chunks = chunk_text(text)[:60]
+        print(f"[tool]   chunked → {len(chunks)} chunks, embedding now...")
         add_chunks(collection, chunks, source_url=url)
+        print(f"[tool] ✓ scrape_and_store — {len(chunks)} chunks stored")
         return f"Stored {len(chunks)} chunks from: {url}"
 
     elif name == "generate_report":
         question = args["question"]
         n = args.get("n_results", 8)
+        print(f"[tool]   retrieving {n} chunks...")
         retrieved = query_chunks(collection, question, n_results=n)
         if not retrieved:
             return "No relevant content in the database yet. Scrape more sources first."
-        return _generate_report(question, retrieved)
+        print(f"[tool]   calling reporter with {len(retrieved)} chunks...")
+        report = _generate_report(question, retrieved)
+        print(f"[tool] ✓ generate_report — {len(report)} chars")
+        return report
 
     else:
         return f"Unknown tool: {name}"

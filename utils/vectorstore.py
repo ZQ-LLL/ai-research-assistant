@@ -30,6 +30,11 @@ from sentence_transformers import SentenceTransformer
 _EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 _model = SentenceTransformer(_EMBEDDING_MODEL)
 
+# Run a dummy encode in the main thread so PyTorch's BLAS/threading
+# infrastructure initialises here, not in a background thread.
+# On Windows, first-time encode from a non-main thread can crash the process.
+_model.encode(["warmup"], show_progress_bar=False)
+
 
 def create_collection() -> chromadb.Collection:
     """
