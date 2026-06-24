@@ -38,8 +38,11 @@ def create_collection() -> chromadb.Collection:
     are written to disk. Call this once at the start of each research question.
     """
     client = chromadb.EphemeralClient()
+    # Use a unique name so there is never a collision, even if EphemeralClient
+    # shares in-process state across Streamlit reruns.
+    name = f"research_{uuid.uuid4().hex}"
     return client.create_collection(
-        name="research",
+        name=name,
         metadata={"hnsw:space": "cosine"},  # cosine distance: 0=identical, 1=unrelated
     )
 
