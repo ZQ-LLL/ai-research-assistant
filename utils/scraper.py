@@ -2,31 +2,52 @@
 utils/scraper.py
 Responsible for: extracting clean text content from a URL.
 
-trafilatura is a library designed specifically for this task. Given a URL,
-it fetches the page and strips out navigation bars, ads, footers, HTML tags,
-and other noise — leaving only the main article text.
+We split fetching and parsing into two steps:
+  1. requests.get()      — gives us full control over timeout and headers
+  2. trafilatura.extract() — strips HTML noise, returns clean article text
 
-Why not just use requests + BeautifulSoup?
-Because most pages mix article text with menus, sidebars, and ads.
-Separating them reliably with CSS selectors is fragile and site-specific.
-trafilatura uses heuristics trained on thousands of real pages to do this
-automatically, which is why it's the standard choice for RAG pipelines.
+Why not use trafilatura.fetch_url()?
+trafilatura's internal fetch doesn't reliably respect timeout on all platforms
+(especially Chinese sites with slow or unusual responses). Using requests
+directly ensures we never hang longer than TIMEOUT_SECONDS.
 """
 
 import trafilatura
+import requests
+
+TIMEOUT_SECONDS = 12
+
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
 
 
 def scrape_url(url: str) -> str | None:
     """
     Fetch a URL and extract its main text content.
 
-    Returns the clean article text, or None if extraction fails
-    (e.g. paywall, bot detection, connection error, no main content found).
+    Returns the clean article text, or None if anything fails
+    (timeout, HTTP error, bot detection, no extractable content).
     Callers should skip None results rather than crashing.
     """
-    html = trafilatura.fetch_url(url, timeout=15)   # don't hang on slow servers
-    if html is None:
+    try:
+        response = requests.get(
+            url,
+            headers=_HEADERS,
+            timeout=TIMEOUT_SECONDS,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        # apparent_encoding uses charset-normalizer to detect the real encoding,
+        # which is more reliable than trusting the Content-Type header —
+        # especially for Chinese sites that often declare latin-1 but serve UTF-8 or GBK.
+        response.encoding = response.apparent_encoding
+        html = response.text
+    except Exception:
         return None
 
-    text = trafilatura.extract(html)
-    return text  # may still be None if trafilatura finds no main content
+    return trafilatura.extract(html)
