@@ -5,10 +5,14 @@ Streamlit UI for the AI Research Assistant.
 Flow:
   1. User types a research question and clicks "Research".
   2. A fresh ChromaDB collection is created for this session.
-  3. The agent loop runs — each tool call is shown live in a status widget.
-  4. When the agent calls generate_report, the report is stored in session state.
-  5. The report is rendered as markdown with a download button.
+  3. The agent runs in a background thread so the main thread stays alive
+     and keeps the WebSocket connection open with the browser.
+  4. The main thread polls a shared event list and updates the status widget.
+  5. When the agent finishes, the report is stored in session state and rendered.
 """
+
+import threading
+import time
 
 import streamlit as st
 
@@ -57,17 +61,45 @@ run_clicked = st.button(
     use_container_width=False,
 )
 
+# ── Helper: render one agent step into the status widget ──────
+
+def _render_step(status, event: dict) -> None:
+    etype = event["type"]
+
+    if etype == "tool_call":
+        name = event["name"]
+        args = event["args"]
+        if name == "search_web":
+            status.write(f"🔍 **Searching:** *{args['query']}*")
+        elif name == "scrape_and_store":
+            url = args["url"]
+            short = url if len(url) <= 70 else url[:67] + "..."
+            status.write(f"📄 **Reading:** {short}")
+        elif name == "generate_report":
+            status.write("✍️ **Generating report...**")
+
+    elif etype == "tool_result":
+        name   = event["name"]
+        result = event["result"]
+        if name == "scrape_and_store":
+            status.write(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {result}")
+        elif name == "search_web":
+            n = result.count("URL:")
+            status.write(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {n} results found")
+
+    elif etype == "limit":
+        status.write("⚠️ Agent reached the step limit.")
+
+
 # ── Agent run ─────────────────────────────────────────────────
 
 if run_clicked and question.strip():
-    # Clear any previous report
     st.session_state.pop("report", None)
     st.session_state.pop("question", None)
 
     collection = create_collection()
 
-    # Ingest uploaded files before the agent runs so it can retrieve
-    # content from them via query_chunks, same as any web source.
+    # Ingest uploaded files before the agent runs.
     if uploaded_files:
         with st.status("Reading uploaded files...", expanded=False) as ingest_status:
             for f in uploaded_files:
@@ -81,64 +113,54 @@ if run_clicked and question.strip():
                 ingest_status.write(f"📎 **{f.name}** → {n} chunks stored")
             ingest_status.update(label="Files ready.", state="complete")
 
-    with st.status("Agent is researching...", expanded=True) as status:
+    # Run the agent in a background thread so the Streamlit main thread
+    # stays alive and keeps the WebSocket connection open.
+    # The thread writes step events to a plain list (GIL-safe for appends);
+    # the main thread reads from it and updates the status widget.
+    steps: list[dict] = []
+    outcome: dict = {}          # populated by worker: {"report": ...} or {"error": ...}
 
-        def on_step(event: dict):
-            etype = event["type"]
-
-            if etype == "tool_call":
-                name = event["name"]
-                args = event["args"]
-
-                if name == "search_web":
-                    status.write(f"🔍 **Searching:** *{args['query']}*")
-
-                elif name == "scrape_and_store":
-                    url = args["url"]
-                    short = url if len(url) <= 70 else url[:67] + "..."
-                    status.write(f"📄 **Reading:** {short}")
-
-                elif name == "generate_report":
-                    status.write("✍️ **Generating report...**")
-
-            elif etype == "tool_result":
-                name  = event["name"]
-                result = event["result"]
-
-                if name == "scrape_and_store":
-                    # Show chunk count (or failure) indented under the URL
-                    status.write(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {result}")
-
-                elif name == "search_web":
-                    n = result.count("URL:")
-                    status.write(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {n} results found")
-
-            elif etype == "limit":
-                st.warning("Agent reached the step limit without finishing.")
-
+    def _worker():
         try:
-            report = run_agent(question.strip(), collection, on_step=on_step)
-            st.session_state["report"]   = report
+            report = run_agent(
+                question.strip(),
+                collection,
+                on_step=lambda e: steps.append(e),
+            )
+            outcome["report"] = report
+        except Exception as exc:
+            outcome["error"] = str(exc)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    rendered = 0
+    with st.status("Agent is researching...", expanded=True) as status:
+        while thread.is_alive() or rendered < len(steps):
+            # Flush any new step events to the status widget
+            while rendered < len(steps):
+                _render_step(status, steps[rendered])
+                rendered += 1
+            if thread.is_alive():
+                time.sleep(0.3)   # yield so Streamlit can send WebSocket frames
+
+        thread.join()
+
+        if "error" in outcome:
+            status.update(label="Error", state="error", expanded=True)
+            st.error(f"Something went wrong: {outcome['error']}")
+        else:
+            st.session_state["report"]   = outcome["report"]
             st.session_state["question"] = question.strip()
             status.update(label="Research complete!", state="complete", expanded=False)
-
-        except Exception as e:
-            status.update(label="Error", state="error", expanded=True)
-            st.error(f"Something went wrong: {e}")
 
 # ── Report display ────────────────────────────────────────────
 
 if st.session_state.get("report"):
     st.divider()
-
-    # Question recap
     st.markdown(f"**Question:** {st.session_state['question']}")
     st.markdown("")
-
-    # Report body
     st.markdown(st.session_state["report"])
-
-    # Download button
     st.download_button(
         label="Download report (.md)",
         data=st.session_state["report"],
