@@ -13,7 +13,7 @@ Flow:
 import streamlit as st
 
 from utils.agent import run_agent
-from utils.ingest import ingest_pdf
+from utils.ingest import ingest_csv, ingest_pdf
 from utils.vectorstore import create_collection
 
 # ── Page config ───────────────────────────────────────────────
@@ -37,9 +37,9 @@ st.divider()
 
 uploaded_files = st.file_uploader(
     "Upload documents (optional)",
-    type=["pdf"],
+    type=["pdf", "csv", "xlsx", "xls"],
     accept_multiple_files=True,
-    help="PDFs will be added to the research database alongside web sources.",
+    help="PDFs and spreadsheets will be added to the research database alongside web sources.",
 )
 
 # ── Input ─────────────────────────────────────────────────────
@@ -71,7 +71,13 @@ if run_clicked and question.strip():
     if uploaded_files:
         with st.status("Reading uploaded files...", expanded=False) as ingest_status:
             for f in uploaded_files:
-                n = ingest_pdf(f.read(), f.name, collection)
+                name_lower = f.name.lower()
+                if name_lower.endswith(".pdf"):
+                    n = ingest_pdf(f.read(), f.name, collection)
+                elif name_lower.endswith((".csv", ".xlsx", ".xls")):
+                    n = ingest_csv(f.read(), f.name, collection)
+                else:
+                    n = 0
                 ingest_status.write(f"📎 **{f.name}** → {n} chunks stored")
             ingest_status.update(label="Files ready.", state="complete")
 
