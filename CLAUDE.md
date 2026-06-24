@@ -28,15 +28,20 @@ TAVILY_API_KEY=...       # Web search
 The pipeline runs in this order on every research question:
 
 ```
+(optional) Uploaded PDFs
+  → ingest.py: ingest_pdf()        # pymupdf → chunk → ChromaDB (same pipeline as web)
+
 User question
   → agent.py: run_agent()          # drives the loop
       → search.py: search_web()    # Tavily → list of {url, title, snippet}
       → scraper.py: scrape_url()   # trafilatura → clean article text
       → chunker.py: chunk_text()   # split into 400-char overlapping chunks
       → vectorstore.py: add_chunks()  # sentence-transformers embed → ChromaDB store
-      → vectorstore.py: query_chunks() # cosine similarity retrieval
+      → vectorstore.py: query_chunks() # cosine similarity retrieval (web + PDFs unified)
       → reporter.py: generate_report() # Claude synthesises cited report
 ```
+
+PDF sources appear in citations as `file:<filename>` to distinguish them from URLs.
 
 **agent.py** is the orchestrator. It exposes three tools to Claude (`search_web`, `scrape_and_store`, `generate_report`) and runs an OpenAI-format tool-calling loop. When Claude calls `generate_report`, the loop exits immediately and returns that result — no second API call.
 

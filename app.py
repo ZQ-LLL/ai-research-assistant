@@ -13,6 +13,7 @@ Flow:
 import streamlit as st
 
 from utils.agent import run_agent
+from utils.ingest import ingest_pdf
 from utils.vectorstore import create_collection
 
 # ── Page config ───────────────────────────────────────────────
@@ -31,6 +32,15 @@ st.caption(
     "Powered by Tavily search + ChromaDB + Claude."
 )
 st.divider()
+
+# ── File upload (optional) ────────────────────────────────────
+
+uploaded_files = st.file_uploader(
+    "Upload documents (optional)",
+    type=["pdf"],
+    accept_multiple_files=True,
+    help="PDFs will be added to the research database alongside web sources.",
+)
 
 # ── Input ─────────────────────────────────────────────────────
 
@@ -55,6 +65,15 @@ if run_clicked and question.strip():
     st.session_state.pop("question", None)
 
     collection = create_collection()
+
+    # Ingest uploaded files before the agent runs so it can retrieve
+    # content from them via query_chunks, same as any web source.
+    if uploaded_files:
+        with st.status("Reading uploaded files...", expanded=False) as ingest_status:
+            for f in uploaded_files:
+                n = ingest_pdf(f.read(), f.name, collection)
+                ingest_status.write(f"📎 **{f.name}** → {n} chunks stored")
+            ingest_status.update(label="Files ready.", state="complete")
 
     with st.status("Agent is researching...", expanded=True) as status:
 
