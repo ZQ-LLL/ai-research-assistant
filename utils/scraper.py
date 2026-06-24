@@ -24,7 +24,7 @@ def scrape_url(url: str) -> str | None:
     (e.g. paywall, bot detection, connection error, no main content found).
     Callers should skip None results rather than crashing.
     """
-    html = trafilatura.fetch_url(url)
+    html = trafilatura.fetch_url(url, timeout=15)   # don't hang on slow servers
     if html is None:
         return None
 

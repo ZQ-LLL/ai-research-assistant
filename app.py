@@ -135,16 +135,23 @@ if run_clicked and question.strip():
     thread.start()
 
     rendered = 0
+    deadline = time.time() + 360   # 6-minute hard ceiling
+
     with st.status("Agent is researching...", expanded=True) as status:
         while thread.is_alive() or rendered < len(steps):
-            # Flush any new step events to the status widget
             while rendered < len(steps):
                 _render_step(status, steps[rendered])
                 rendered += 1
             if thread.is_alive():
+                if time.time() > deadline:
+                    outcome["error"] = (
+                        "Timed out after 6 minutes. "
+                        "Try a more specific question or fewer sources."
+                    )
+                    break
                 time.sleep(0.3)   # yield so Streamlit can send WebSocket frames
 
-        thread.join()
+        thread.join(timeout=5)
 
         if "error" in outcome:
             status.update(label="Error", state="error", expanded=True)

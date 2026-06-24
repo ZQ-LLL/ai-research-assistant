@@ -34,6 +34,7 @@ load_dotenv()
 _client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1",
+    timeout=90.0,   # hard limit per API call; prevents silent hangs
 )
 
 MODEL = "anthropic/claude-sonnet-4-5"
@@ -196,13 +197,17 @@ def run_agent(
         {"role": "user",   "content": question},
     ]
 
+    print(f"[agent] starting — question: {question[:80]}")
+
     for step in range(max_steps):
+        print(f"[agent] step {step + 1}/{max_steps} — calling API...")
         response = _client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
         )
+        print(f"[agent] step {step + 1} — API returned")
 
         msg = response.choices[0].message
 
