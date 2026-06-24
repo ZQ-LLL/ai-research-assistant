@@ -8,7 +8,9 @@ Flow:
   3. The agent runs in a background thread so the main thread stays alive
      and keeps the WebSocket connection open with the browser.
   4. The main thread polls a shared event list and updates the status widget.
-  5. When the agent finishes, the report is stored in session state and rendered.
+  5. When the agent finishes, the report is rendered directly in the same
+     script pass — no st.rerun(). st.rerun() triggers a WebSocket reset
+     that causes a "Connection error" flash and page reload, clearing session_state.
 """
 
 import threading
@@ -91,6 +93,14 @@ def _render_step(status, event: dict) -> None:
         status.write("⚠️ Agent reached the step limit.")
 
 
+# ── State initialised before the conditional blocks ───────────
+# _fresh_report is populated if the agent just ran in THIS script pass.
+# The report-display section reads it first, falling back to session_state
+# for page reloads. This avoids needing st.rerun() which resets the WebSocket.
+
+_fresh_report    = ""
+_fresh_question  = ""
+
 # ── Agent run ─────────────────────────────────────────────────
 
 if run_clicked and question.strip():
@@ -115,10 +125,8 @@ if run_clicked and question.strip():
 
     # Run the agent in a background thread so the Streamlit main thread
     # stays alive and keeps the WebSocket connection open.
-    # The thread writes step events to a plain list (GIL-safe for appends);
-    # the main thread reads from it and updates the status widget.
     steps: list[dict] = []
-    outcome: dict = {}          # populated by worker: {"report": ...} or {"error": ...}
+    outcome: dict = {}
 
     def _worker():
         try:
@@ -135,7 +143,7 @@ if run_clicked and question.strip():
     thread.start()
 
     rendered = 0
-    deadline = time.time() + 360   # 6-minute hard ceiling
+    deadline = time.time() + 360
 
     with st.status("Agent is researching...", expanded=True) as status:
         while thread.is_alive() or rendered < len(steps):
@@ -149,7 +157,7 @@ if run_clicked and question.strip():
                         "Try a more specific question or fewer sources."
                     )
                     break
-                time.sleep(0.3)   # yield so Streamlit can send WebSocket frames
+                time.sleep(0.3)
 
         thread.join(timeout=5)
 
@@ -160,23 +168,22 @@ if run_clicked and question.strip():
             st.session_state["report"]   = outcome["report"]
             st.session_state["question"] = question.strip()
             status.update(label="Research complete!", state="complete", expanded=False)
-
-    # Trigger a clean script re-run so the report renders in a fresh context.
-    # Without this, Streamlit tries to render the report in the same pass as the
-    # status widget update, which causes a WebSocket disconnect on some versions.
-    if "report" in outcome:
-        st.rerun()
+            _fresh_report   = outcome["report"]
+            _fresh_question = question.strip()
 
 # ── Report display ────────────────────────────────────────────
 
-if st.session_state.get("report"):
+_report_to_show   = _fresh_report   or st.session_state.get("report",   "")
+_question_to_show = _fresh_question or st.session_state.get("question", "")
+
+if _report_to_show:
     st.divider()
-    st.markdown(f"**Question:** {st.session_state['question']}")
+    st.markdown(f"**Question:** {_question_to_show}")
     st.markdown("")
-    st.markdown(st.session_state["report"])
+    st.markdown(_report_to_show)
     st.download_button(
         label="Download report (.md)",
-        data=st.session_state["report"],
+        data=_report_to_show,
         file_name="research_report.md",
         mime="text/markdown",
     )
