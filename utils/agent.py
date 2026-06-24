@@ -52,7 +52,7 @@ Workflow:
 Rules:
 - Never answer from your own knowledge — use only what the tools return.
 - Be selective: only scrape pages whose snippets suggest they directly answer the question.
-- Scrape at most 8 URLs total (avoid wasting time on duplicates or off-topic pages).
+- Scrape at most 5 URLs total. Stop scraping as soon as you have 3 good sources.
 - Call generate_report exactly once, as your final action.
 - Do not summarize or comment after generate_report — it IS your final response."""
 
@@ -153,7 +153,7 @@ def _execute_tool(name: str, args: dict, collection) -> str:
         text = scrape_url(url)
         if text is None:
             return f"Failed to scrape {url} — page may be paywalled or bot-protected."
-        chunks = chunk_text(text)
+        chunks = chunk_text(text)[:60]  # cap per-page to keep embedding time bounded
         add_chunks(collection, chunks, source_url=url)
         return f"Stored {len(chunks)} chunks from: {url}"
 

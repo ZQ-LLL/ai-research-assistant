@@ -1,0 +1,7 @@
+[server]
+# Keep WebSocket alive during long agent runs (default is ~60s)
+maxUploadSize = 50
+
+[browser]
+# Suppress the "Is Streamlit still running?" prompt on slow operations
+serverPort = 8501
