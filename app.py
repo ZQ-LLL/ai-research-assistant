@@ -161,6 +161,12 @@ if run_clicked and question.strip():
             st.session_state["question"] = question.strip()
             status.update(label="Research complete!", state="complete", expanded=False)
 
+    # Trigger a clean script re-run so the report renders in a fresh context.
+    # Without this, Streamlit tries to render the report in the same pass as the
+    # status widget update, which causes a WebSocket disconnect on some versions.
+    if "report" in outcome:
+        st.rerun()
+
 # ── Report display ────────────────────────────────────────────
 
 if st.session_state.get("report"):
